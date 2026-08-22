@@ -38,7 +38,10 @@ Use `visual: transporter` for the alternative appearance. Both visuals support:
 - Home Assistant gauge-compatible `needle` and `severity` bands;
 - independent displayed, indicator, selector, target, and control entities;
 - pointer and keyboard control;
-- scale labels calculated from the available space.
+- scale labels calculated from the available space;
+- independent display units through `scale_divisor`, `scale_unit`, and `scale_decimals`;
+- an optional value label inside the slider;
+- an optional `name` rendered below horizontal sliders.
 
 The graphical editor keeps focus while typing or holding a numeric stepper control, so values can be entered continuously.
 
@@ -46,7 +49,7 @@ See [`examples.yaml`](examples.yaml) for complete configurations.
 
 ## Version
 
-Current stable release: `v1.1.0`.
+Current stable release: `v1.2.0`.
 
 ## License
 

@@ -1,4 +1,4 @@
-/** LCARS Slider Button v1.1.0 */
+/** LCARS Slider Button v1.2.0 */
 class LcarsEnvironmentCard extends HTMLElement {
   static getConfigElement() {
     return document.createElement("lcars-slider-button-editor");
@@ -59,6 +59,11 @@ class LcarsEnvironmentCard extends HTMLElement {
       direction: "normal",
       width: null,
       height: null,
+      scale_divisor: 1,
+      scale_unit: "",
+      scale_decimals: null,
+      value_label_position: "none",
+      value_label_source: "gauge",
       panel: "#9b9b9b",
       ...config,
     };
@@ -222,6 +227,33 @@ class LcarsEnvironmentCard extends HTMLElement {
     return value.toFixed(this._config.decimals).replace(".", ",");
   }
 
+  _displayNumber(value, divisor, decimals, unit = "") {
+    if (value === null || !Number.isFinite(value)) return "—";
+    const safeDivisor = Number(divisor) > 0 ? Number(divisor) : 1;
+    const places = Number.isFinite(Number(decimals)) ? Math.max(0, Number(decimals)) : this._config.decimals;
+    const number = (value / safeDivisor).toFixed(places).replace(".", ",");
+    return unit ? `${number}\u202f${unit}` : number;
+  }
+
+  _formatScale(value) {
+    return this._displayNumber(
+      value,
+      this._config.scale_divisor,
+      this._config.scale_decimals ?? this._config.decimals,
+      ""
+    );
+  }
+
+  _valueLabel() {
+    if (this._config.value_label_position !== "inside") return "";
+    const value = this._config.value_label_source === "pointer" ? this._pointerValue() : this._gaugeValue();
+    const state = this._state(this._config.entity);
+    const divisor = this._config.value_divisor ?? this._config.scale_divisor;
+    const decimals = this._config.value_decimals ?? this._config.scale_decimals ?? this._config.decimals;
+    const unit = this._config.value_unit ?? (this._config.scale_unit || state?.attributes?.unit_of_measurement || this._config.unit);
+    return this._displayNumber(value, divisor, decimals, unit);
+  }
+
   _setTargetFromPointer(event) {
     if (!this._config.control_entity || !this._hass) return;
     const track = this.shadowRoot.querySelector(".track");
@@ -337,6 +369,10 @@ class LcarsEnvironmentCard extends HTMLElement {
       value += niceStep;
     }
     values.push(max);
+    const minimumValueGap = range * minimumLabelGap / usablePixels;
+    if (values.length > 2 && max - values[values.length - 2] < minimumValueGap) {
+      values.splice(values.length - 2, 1);
+    }
     return [...new Set(values)];
   }
 
@@ -355,6 +391,8 @@ class LcarsEnvironmentCard extends HTMLElement {
     const reverse = this._config.direction === "reverse";
     const displayPointerPct = reverse ? 100 - pointerPct : pointerPct;
     const horizontal = this._config.orientation === "horizontal";
+    const showName = horizontal && Boolean(this._config.name);
+    const nameSpace = showName ? 25 : 0;
     const componentWidth = horizontal
       ? Math.max(72, Number(this._config.height) || Number(this._config.width) || 88)
       : Math.max(72, Number(this._config.width) || 88);
@@ -367,7 +405,7 @@ class LcarsEnvironmentCard extends HTMLElement {
       : (this._config.max - value) / (this._config.max - this._config.min);
     const majorTicks = scaleValues.map((value) => {
       const ratio = tickRatio(value);
-      return `<span class="major" style="top:calc(${ratio * 100}% + ${10 - ratio * 20}px)"><b>${this._format(value)}</b></span>`;
+      return `<span class="major" style="top:calc(${ratio * 100}% + ${10 - ratio * 20}px)"><b>${this._formatScale(value)}</b></span>`;
     });
     const minorTicks = scaleValues.slice(0, -1).map((value, index) => {
       const midpoint = (value + scaleValues[index + 1]) / 2;
@@ -384,7 +422,7 @@ class LcarsEnvironmentCard extends HTMLElement {
     }).join("");
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display:inline-block; width:${horizontal ? "100%" : `${componentWidth}px`}; height:${horizontal ? componentWidth : scaleLength}px !important; min-height:${horizontal ? componentWidth : scaleLength}px; --c:${this._cssColor(this._config.color)}; --a:${this._cssColor(this._config.accent, "accent")}; }
+        :host { position:relative; display:inline-block; width:${horizontal ? "100%" : `${componentWidth}px`}; height:${horizontal ? componentWidth + nameSpace : scaleLength}px !important; min-height:${horizontal ? componentWidth + nameSpace : scaleLength}px; --c:${this._cssColor(this._config.color)}; --a:${this._cssColor(this._config.accent, "accent")}; }
         ha-card { width:${componentWidth}px; height:${scaleLength}px; min-height:${scaleLength}px; box-sizing:border-box; overflow:visible; background:transparent; border:0; box-shadow:none; color:#fff; font-family:'Arial Narrow','Roboto Condensed',sans-serif; transform-origin:top left; ${horizontal ? `transform:translateX(${scaleLength}px) rotate(90deg);` : ''} }
         .gauge { position:relative; width:${componentWidth}px; height:${scaleLength}px; }
         .track { position:absolute; inset:0 28px 0 0; border:2px solid #6b5960; border-radius:22px; background:#050505; touch-action:none; cursor:pointer; outline:none; }
@@ -395,22 +433,28 @@ class LcarsEnvironmentCard extends HTMLElement {
         .segments i.severity-yellow { --level-color:${this._cssColor(this._config.severity_yellow_color || "theme", "warning")}; }
         .segments i.severity-red { --level-color:${this._cssColor(this._config.severity_red_color || "theme", "error")}; }
         .segments i.on { background:linear-gradient(90deg,color-mix(in srgb,var(--level-color) 58%,white),var(--level-color)); box-shadow:0 0 5px color-mix(in srgb,var(--level-color) 55%,transparent); }
+        .value-label { position:absolute; inset:4px; z-index:2; display:flex; align-items:center; justify-content:center; color:#fff; font-size:15px; font-weight:900; letter-spacing:.03em; text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 5px #000; pointer-events:none; ${horizontal ? 'transform:rotate(-90deg);' : ''} }
+        .scale-unit { position:absolute; right:8px; top:8px; z-index:2; color:#fff; font-size:10px; font-weight:900; letter-spacing:.06em; text-shadow:0 0 4px #000,-1px -1px 0 #000,1px 1px 0 #000; pointer-events:none; ${horizontal ? 'transform:rotate(-90deg); transform-origin:center;' : ''} }
         .pointer { position:absolute; left:calc(100% - 28px); width:0; height:0; border-top:8px solid transparent; border-bottom:8px solid transparent; border-right:10px solid var(--c); }
         .ticks span { position:absolute; left:calc(100% - 17px); transform:translateY(-50%); color:var(--a); font-size:11px; white-space:nowrap; }
         .ticks span::before { content:''; position:absolute; right:100%; top:50%; width:11px; border-top:1px solid var(--a); }
         .ticks span.minor::before { width:6px; }
         .ticks b { display:block; min-width:24px; font:inherit; font-weight:400; text-align:left; ${horizontal ? 'transform:rotate(-90deg); transform-origin:center; text-align:center;' : ''} }
         .foot { padding:0 18px 12px; font-size:10px; color:#999; letter-spacing:.08em; text-align:right; }
+        .name-label { position:absolute; left:0; right:0; top:${componentWidth + 5}px; color:#fff; font-size:15px; font-weight:900; line-height:18px; letter-spacing:.03em; text-align:center; text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 5px #000; pointer-events:none; }
       </style>
       <ha-card>
         <div class="gauge">
           <div class="track" role="${this._isInteractive() ? "slider" : "meter"}" tabindex="${this._isInteractive() ? 0 : -1}" aria-valuemin="${this._config.min}" aria-valuemax="${this._config.max}" aria-valuenow="${pointer ?? ""}">
             <div class="segments">${segments}</div>
+            ${this._config.value_label_position === "inside" ? `<div class="value-label">${this._valueLabel()}</div>` : ""}
+            ${this._config.scale_unit && this._config.value_label_position !== "inside" ? `<div class="scale-unit">${this._config.scale_unit}</div>` : ""}
           </div>
           <div class="pointer" style="bottom:calc(${displayPointerPct}% + ${2 - displayPointerPct * 0.2}px)"></div>
           <div class="ticks">${ticks}</div>
         </div>
-      </ha-card>`;
+      </ha-card>
+      ${showName ? `<div class="name-label">${this._config.name}</div>` : ""}`;
     this._bindEvents();
   }
 
@@ -422,6 +466,8 @@ class LcarsEnvironmentCard extends HTMLElement {
     const reverse = this._config.direction === "reverse";
     const displayPointerPct = reverse ? 100 - pointerPct : pointerPct;
     const horizontal = this._config.orientation === "horizontal";
+    const showName = horizontal && Boolean(this._config.name);
+    const nameSpace = showName ? 26 : 0;
     const componentWidth = horizontal
       ? Math.max(118, Number(this._config.height) || Number(this._config.width) || 154)
       : Math.max(118, Number(this._config.width) || 154);
@@ -433,7 +479,7 @@ class LcarsEnvironmentCard extends HTMLElement {
       const ratio = reverse
         ? (value - this._config.min) / (this._config.max - this._config.min)
         : (this._config.max - value) / (this._config.max - this._config.min);
-      return `<div class="tick" style="top:calc(${ratio * 100}% + ${10 - ratio * 20}px)"><b>${this._format(value)}</b></div>`;
+      return `<div class="tick" style="top:calc(${ratio * 100}% + ${10 - ratio * 20}px)"><b>${this._formatScale(value)}</b></div>`;
     }).join("");
     const cursorBottom = `calc(${displayPointerPct}% + ${10 - displayPointerPct * 0.2}px)`;
     const levelCount = Math.max(1, Math.round((this._config.max - this._config.min) / this._config.step));
@@ -450,7 +496,7 @@ class LcarsEnvironmentCard extends HTMLElement {
     const role = this._isInteractive() ? "slider" : "meter";
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display:inline-block; width:${horizontal ? "100%" : `${componentWidth}px`}; height:${horizontal ? componentWidth : scaleLength}px !important; min-height:${horizontal ? componentWidth : scaleLength}px; --c:${this._cssColor(this._config.color)}; --a:${this._cssColor(this._config.accent, "accent")}; --p:${this._config.panel}; }
+        :host { position:relative; display:inline-block; width:${horizontal ? "100%" : `${componentWidth}px`}; height:${horizontal ? componentWidth + nameSpace : scaleLength}px !important; min-height:${horizontal ? componentWidth + nameSpace : scaleLength}px; --c:${this._cssColor(this._config.color)}; --a:${this._cssColor(this._config.accent, "accent")}; --p:${this._config.panel}; }
         ha-card { width:${componentWidth}px; height:${scaleLength}px; min-height:${scaleLength}px; overflow:visible; padding:0; background:transparent; border:0; box-shadow:none; font-family:'Arial Narrow','Roboto Condensed',sans-serif; transform-origin:top left; ${horizontal ? `transform:translateX(${scaleLength}px) rotate(90deg);` : ''} }
         .control { display:grid; grid-template-columns:minmax(60px,calc(100% - 46px)) 46px; height:${scaleLength}px; }
         .assembly { position:relative; width:100%; height:${scaleLength}px; }
@@ -467,9 +513,12 @@ class LcarsEnvironmentCard extends HTMLElement {
         .cursor-arrow { position:absolute; left:0; right:2px; bottom:${cursorBottom}; height:18px; transform:translateY(50%); background:#050505; clip-path:polygon(0 5.25px,calc(100% - 12px) 5.25px,calc(100% - 12px) 0,100% 50%,calc(100% - 12px) 100%,calc(100% - 12px) 12.75px,0 12.75px); filter:drop-shadow(0 0 5px var(--a)); pointer-events:none; }
         .cursor-arrow::after { content:''; position:absolute; inset:1px; background:var(--a); clip-path:polygon(0 5.25px,calc(100% - 10px) 5.25px,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,calc(100% - 10px) 10.75px,0 10.75px); }
         .track { position:absolute; inset:0; z-index:4; touch-action:none; cursor:pointer; outline:none; }
+        .value-label { position:absolute; inset:18px 42px 18px 8px; z-index:3; display:flex; align-items:center; justify-content:center; color:#fff; font-size:16px; font-weight:900; letter-spacing:.03em; text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 5px #000; pointer-events:none; ${horizontal ? 'transform:rotate(-90deg);' : ''} }
+        .scale-unit { position:absolute; right:28px; top:10px; z-index:3; color:#fff; font-size:10px; font-weight:900; letter-spacing:.06em; text-shadow:0 0 4px #000,-1px -1px 0 #000,1px 1px 0 #000; pointer-events:none; ${horizontal ? 'transform:rotate(-90deg); transform-origin:center;' : ''} }
         .scale { position:relative; height:100%; }
         .tick { position:absolute; left:-2px; transform:translateY(-50%); color:var(--a); font-size:13px; font-weight:900; line-height:1; letter-spacing:.02em; white-space:nowrap; }
         .tick b { display:flex; align-items:center; height:16px; min-width:34px; font:inherit; text-align:left; -webkit-text-stroke:1px #050505; paint-order:stroke fill; text-shadow:-1px -1px 0 #050505,1px -1px 0 #050505,-1px 1px 0 #050505,1px 1px 0 #050505,0 0 4px #050505; ${horizontal ? 'transform:rotate(-90deg); transform-origin:center; justify-content:center;' : ''} }
+        .name-label { position:absolute; left:0; right:0; top:${componentWidth + 5}px; color:#fff; font-size:16px; font-weight:900; line-height:18px; letter-spacing:.03em; text-align:center; text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 5px #000; pointer-events:none; }
       </style>
       <ha-card>
         <div class="control">
@@ -477,11 +526,14 @@ class LcarsEnvironmentCard extends HTMLElement {
             <div class="column"><div class="indicator-levels">${indicatorLevels}</div></div>
             <div class="selector-rail"><div class="selector-level"></div></div>
             <div class="cursor-arrow"></div>
+            ${this._config.value_label_position === "inside" ? `<div class="value-label">${this._valueLabel()}</div>` : ""}
+            ${this._config.scale_unit && this._config.value_label_position !== "inside" ? `<div class="scale-unit">${this._config.scale_unit}</div>` : ""}
             <div class="track" role="${role}" tabindex="${this._isInteractive() ? 0 : -1}" aria-label="${this._config.title}" aria-valuemin="${this._config.min}" aria-valuemax="${this._config.max}" aria-valuenow="${pointer ?? ''}"></div>
           </div>
           <div class="scale">${ticks}</div>
         </div>
-      </ha-card>`;
+      </ha-card>
+      ${showName ? `<div class="name-label">${this._config.name}</div>` : ""}`;
     this._bindEvents();
   }
 }
@@ -511,11 +563,20 @@ class LcarsSliderButtonEditor extends HTMLElement {
   _label(schema) {
     const labels = {
       visual: "Visual",
+      name: "Nome abaixo do slider (somente horizontal)",
       mode: "Modo",
       orientation: "Orientação",
       direction: "Sentido do preenchimento",
       width: "Largura (px; horizontal ocupa 100%)",
       height: "Altura (px)",
+      scale_divisor: "Divisor dos valores da escala",
+      scale_unit: "Unidade visual da escala",
+      scale_decimals: "Casas decimais da escala",
+      value_label_position: "Rótulo do valor",
+      value_label_source: "Origem do valor do rótulo",
+      value_divisor: "Divisor do valor do rótulo",
+      value_unit: "Unidade do valor do rótulo",
+      value_decimals: "Casas decimais do rótulo",
       entity: "Entidade principal",
       value_entity: "Entidade exibida",
       gauge_entity: "Entidade do indicador",
@@ -569,6 +630,7 @@ class LcarsSliderButtonEditor extends HTMLElement {
         { value: "environment", label: "Environment" },
         { value: "transporter", label: "Transporter" },
       ] } } },
+      { name: "name", selector: { text: {} } },
       { name: "mode", selector: { select: { mode: "dropdown", options: [
         { value: "slider", label: "Slider" },
         { value: "display", label: "Somente exibição" },
@@ -588,6 +650,20 @@ class LcarsSliderButtonEditor extends HTMLElement {
       ] } } },
       { name: "width", selector: { number: { mode: "box", min: 72, max: 1000, step: 1, unit_of_measurement: "px" } } },
       { name: "height", selector: { number: { mode: "box", min: 72, max: 1000, step: 1, unit_of_measurement: "px" } } },
+      { name: "scale_divisor", selector: { number: { mode: "box", min: 0.000001 } } },
+      { name: "scale_unit", selector: { text: {} } },
+      { name: "scale_decimals", selector: { number: { mode: "box", min: 0, max: 6, step: 1 } } },
+      { name: "value_label_position", selector: { select: { mode: "dropdown", options: [
+        { value: "none", label: "Oculto" },
+        { value: "inside", label: "Dentro do slider" },
+      ] } } },
+      { name: "value_label_source", selector: { select: { mode: "dropdown", options: [
+        { value: "gauge", label: "Valor do indicador" },
+        { value: "pointer", label: "Valor do seletor" },
+      ] } } },
+      { name: "value_divisor", selector: { number: { mode: "box", min: 0.000001 } } },
+      { name: "value_unit", selector: { text: {} } },
+      { name: "value_decimals", selector: { number: { mode: "box", min: 0, max: 6, step: 1 } } },
       { name: "entity", required: true, selector: { entity: {} } },
       { name: "value_entity", selector: { entity: {} } },
       { name: "gauge_entity", selector: { entity: {} } },

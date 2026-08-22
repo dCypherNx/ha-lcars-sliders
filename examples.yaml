@@ -109,3 +109,24 @@ severity:
   red: 75
 color: theme
 accent: theme
+
+# A escala e o rótulo podem usar uma unidade mais compacta sem alterar o valor real.
+---
+type: custom:lcars-slider-button
+visual: environment
+orientation: horizontal
+height: 88
+mode: display
+entity: sensor.memory_available
+name: Memória disponível
+min: 0
+max: 248832
+step: 1024
+scale_divisor: 1024
+scale_unit: MB
+scale_decimals: 0
+value_label_position: inside
+value_label_source: gauge
+value_divisor: 1024
+value_unit: MB
+value_decimals: 0
