@@ -1,0 +1,88 @@
+# Cada cartão é independente e reutiliza o mesmo componente.
+# Recursos necessários:
+#   /local/lcars-slider-button.js
+
+type: horizontal-stack
+cards:
+  - type: custom:lcars-slider-button
+    visual: environment
+    orientation: vertical # vertical ou horizontal
+    direction: normal # normal ou reverse
+    width: 88 # largura em px
+    title: TEMPERATURA
+    mode: slider
+    entity: sensor.room_temperature
+    value_entity: sensor.room_temperature
+    gauge_entity: sensor.room_temperature
+    pointer_entity: climate.room
+    pointer_attribute: temperature
+    target_entity: climate.room
+    target_attribute: temperature
+    control_entity: climate.room
+    unit: °C
+    min: 16
+    max: 30
+    step: 1
+    decimals: 1
+    trend_minutes: 60
+    color: "#ff7733"
+    accent: "#ffb08a"
+
+  - type: custom:lcars-slider-button
+    title: UMIDADE
+    mode: display
+    entity: sensor.room_humidity
+    value_entity: sensor.room_humidity
+    gauge_entity: sensor.room_humidity
+    # O ponteiro pode usar outra entidade/atributo, independentemente do conteúdo.
+    pointer_entity: sensor.room_humidity
+    unit: "%"
+    min: 0
+    max: 100
+    step: 1
+    decimals: 0
+    trend_minutes: 60
+    color: "#ffb000"
+    accent: "#ffd27a"
+
+  - type: custom:lcars-slider-button
+    title: POTÊNCIA
+    mode: display
+    entity: sensor.room_power
+    unit: W
+    min: 0
+    max: 2500
+    step: 10
+    decimals: 0
+    trend_minutes: 60
+    color: "#aa99ff"
+    accent: "#d9d0ff"
+
+# Slider alternativo inspirado no console do transportador de TNG.
+# Pode coexistir com os medidores acima e não os substitui.
+---
+type: custom:lcars-slider-button
+visual: transporter
+orientation: vertical # vertical ou horizontal
+direction: normal # normal ou reverse
+width: 154 # largura em px
+title: CONTROLE DO TRANSPORTADOR
+label: TEMPERATURA DESEJADA
+mode: slider
+entity: sensor.room_temperature
+value_entity: sensor.room_temperature
+gauge_entity: sensor.room_temperature
+# O seletor pode ser independente do indicador. Neste exemplo, usa o alvo do climate.
+pointer_entity: climate.room
+pointer_attribute: temperature
+target_entity: climate.room
+target_attribute: temperature
+control_entity: climate.room
+unit: °C
+min: 16
+max: 30
+step: 1
+decimals: 0
+color: "#ff5b24"
+accent: "#aaa0ff"
+panel: "#a1a1a1"
