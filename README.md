@@ -32,16 +32,21 @@ Use `visual: transporter` for the alternative appearance. Both visuals support:
 - graphical Lovelace editor;
 - `vertical` and `horizontal` orientations;
 - normal and reversed fill direction;
-- configurable width;
+- horizontal sizing at 100% of the available width with configurable pixel height;
+- fixed configurable pixel width and height in vertical orientation;
+- automatic scale recalculation through `ResizeObserver`;
+- Home Assistant gauge-compatible `needle` and `severity` bands;
 - independent displayed, indicator, selector, target, and control entities;
 - pointer and keyboard control;
 - scale labels calculated from the available space.
+
+The graphical editor keeps focus while typing or holding a numeric stepper control, so values can be entered continuously.
 
 See [`examples.yaml`](examples.yaml) for complete configurations.
 
 ## Version
 
-Current stable MVP: `v1.0.0`.
+Current stable release: `v1.1.0`.
 
 ## License
 

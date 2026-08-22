@@ -9,6 +9,7 @@ cards:
     orientation: vertical # vertical ou horizontal
     direction: normal # normal ou reverse
     width: 88 # largura em px
+    height: 230 # altura fixa em px na vertical
     title: TEMPERATURA
     mode: slider
     entity: sensor.room_temperature
@@ -66,6 +67,7 @@ visual: transporter
 orientation: vertical # vertical ou horizontal
 direction: normal # normal ou reverse
 width: 154 # largura em px
+height: 300 # altura fixa em px na vertical; na horizontal define a espessura
 title: CONTROLE DO TRANSPORTADOR
 label: TEMPERATURA DESEJADA
 mode: slider
@@ -86,3 +88,24 @@ decimals: 0
 color: "#ff5b24"
 accent: "#aaa0ff"
 panel: "#a1a1a1"
+
+# Na horizontal, a largura é sempre 100% do contêiner e a escala é responsiva.
+# Para reproduzir o comportamento do gauge nativo, use needle + severity.
+---
+type: custom:lcars-slider-button
+visual: environment
+orientation: horizontal
+height: 88
+mode: display
+entity: sensor.router_load
+name: Carga do roteador
+min: 0
+max: 100
+step: 1
+needle: true
+severity:
+  green: 0
+  yellow: 50
+  red: 75
+color: theme
+accent: theme

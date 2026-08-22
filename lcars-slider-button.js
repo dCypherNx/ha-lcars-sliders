@@ -1,4 +1,4 @@
-/** LCARS Slider Button v1.0.0 */
+/** LCARS Slider Button v1.1.0 */
 class LcarsEnvironmentCard extends HTMLElement {
   static getConfigElement() {
     return document.createElement("lcars-slider-button-editor");
@@ -21,6 +21,24 @@ class LcarsEnvironmentCard extends HTMLElement {
     this._history = [];
     this._historyKey = "";
     this._dragging = false;
+    this._layoutWidth = 0;
+  }
+
+  connectedCallback() {
+    if (!this._resizeObserver && typeof ResizeObserver !== "undefined") {
+      this._resizeObserver = new ResizeObserver((entries) => {
+        const width = entries[0]?.contentRect?.width || 0;
+        if (this._config?.orientation === "horizontal" && width > 0 && Math.abs(width - this._layoutWidth) > 1) {
+          this._layoutWidth = width;
+          this._render();
+        }
+      });
+    }
+    this._resizeObserver?.observe(this);
+  }
+
+  disconnectedCallback() {
+    this._resizeObserver?.disconnect();
   }
 
   setConfig(config) {
@@ -31,8 +49,8 @@ class LcarsEnvironmentCard extends HTMLElement {
       min: 0,
       max: 100,
       step: 1,
-      color: "#ff7a32",
-      accent: "#ffb08a",
+      color: "theme",
+      accent: "theme",
       trend_minutes: 60,
       decimals: 1,
       mode: "display",
@@ -40,9 +58,11 @@ class LcarsEnvironmentCard extends HTMLElement {
       orientation: "vertical",
       direction: "normal",
       width: null,
+      height: null,
       panel: "#9b9b9b",
       ...config,
     };
+    if (config.name && !config.title) this._config.title = config.name;
     this._render();
   }
 
@@ -61,6 +81,45 @@ class LcarsEnvironmentCard extends HTMLElement {
   _number(value) {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  _cssColor(value, role = "primary") {
+    if (value && String(value).trim().toLowerCase() !== "theme") return String(value).trim();
+    const themed = {
+      primary: "var(--primary-color, var(--lcars-crimson, #ff7a32))",
+      accent: "var(--accent-color, var(--lcars-cornflower, #ffb08a))",
+      success: "var(--success-color, var(--lcars-green, #33cc99))",
+      warning: "var(--warning-color, var(--lcars-yellow, #ffcc66))",
+      error: "var(--error-color, var(--lcars-red, #e7432a))",
+    };
+    return themed[role] || themed.primary;
+  }
+
+  _severity() {
+    const configured = this._config.severity || {};
+    const entries = [
+      ["green", configured.green ?? this._config.severity_green],
+      ["yellow", configured.yellow ?? this._config.severity_yellow],
+      ["red", configured.red ?? this._config.severity_red],
+    ].map(([name, value]) => [name, Number(value)])
+      .filter(([, value]) => Number.isFinite(value))
+      .sort((a, b) => a[1] - b[1]);
+    return entries;
+  }
+
+  _severityBand(value) {
+    const entries = this._severity();
+    if (!entries.length) return null;
+    let band = entries[0][0];
+    for (const [name, threshold] of entries) {
+      if (value >= threshold) band = name;
+    }
+    return band;
+  }
+
+  _showSeverityBands() {
+    return this._severity().length > 0 &&
+      (this._config.needle === true || this._config.severity_mode === "bands");
   }
 
   _currentValue() {
@@ -295,9 +354,13 @@ class LcarsEnvironmentCard extends HTMLElement {
     const pointerPct = this._percent(pointer) * 100;
     const reverse = this._config.direction === "reverse";
     const displayPointerPct = reverse ? 100 - pointerPct : pointerPct;
-    const componentWidth = Math.max(72, Number(this._config.width) || 88);
     const horizontal = this._config.orientation === "horizontal";
-    const scaleLength = 230;
+    const componentWidth = horizontal
+      ? Math.max(72, Number(this._config.height) || Number(this._config.width) || 88)
+      : Math.max(72, Number(this._config.width) || 88);
+    const scaleLength = horizontal
+      ? Math.max(120, this._layoutWidth || this.getBoundingClientRect().width || 230)
+      : Math.max(120, Number(this._config.height) || 230);
     const scaleValues = this._scaleValues(scaleLength, 22);
     const tickRatio = (value) => reverse
       ? (value - this._config.min) / (this._config.max - this._config.min)
@@ -312,16 +375,26 @@ class LcarsEnvironmentCard extends HTMLElement {
       return `<span class="minor" style="top:calc(${ratio * 100}% + ${10 - ratio * 20}px)"></span>`;
     });
     const ticks = [...majorTicks, ...minorTicks].join("");
-    const segments = Array.from({ length: 14 }, (_, i) => `<i class="${(i + 1) / 14 <= gaugePct / 100 ? "on" : ""}"></i>`).join("");
+    const showSeverityBands = this._showSeverityBands();
+    const segments = Array.from({ length: 14 }, (_, i) => {
+      const levelValue = this._config.min + ((i + 0.5) / 14) * (this._config.max - this._config.min);
+      const band = this._severityBand(levelValue);
+      const active = showSeverityBands || (i + 1) / 14 <= gaugePct / 100;
+      return `<i class="${active ? "on" : ""} ${band ? `severity-${band}` : ""}"></i>`;
+    }).join("");
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display:inline-block; width:${horizontal ? 230 : componentWidth}px; height:${horizontal ? componentWidth : 230}px; --c:${this._config.color}; --a:${this._config.accent}; }
-        ha-card { width:${componentWidth}px; height:230px; min-height:230px; box-sizing:border-box; overflow:visible; background:transparent; border:0; box-shadow:none; color:#fff; font-family:'Arial Narrow','Roboto Condensed',sans-serif; transform-origin:top left; ${horizontal ? 'transform:translateX(230px) rotate(90deg);' : ''} }
-        .gauge { position:relative; width:${componentWidth}px; height:230px; }
+        :host { display:inline-block; width:${horizontal ? "100%" : `${componentWidth}px`}; height:${horizontal ? componentWidth : scaleLength}px !important; min-height:${horizontal ? componentWidth : scaleLength}px; --c:${this._cssColor(this._config.color)}; --a:${this._cssColor(this._config.accent, "accent")}; }
+        ha-card { width:${componentWidth}px; height:${scaleLength}px; min-height:${scaleLength}px; box-sizing:border-box; overflow:visible; background:transparent; border:0; box-shadow:none; color:#fff; font-family:'Arial Narrow','Roboto Condensed',sans-serif; transform-origin:top left; ${horizontal ? `transform:translateX(${scaleLength}px) rotate(90deg);` : ''} }
+        .gauge { position:relative; width:${componentWidth}px; height:${scaleLength}px; }
         .track { position:absolute; inset:0 28px 0 0; border:2px solid #6b5960; border-radius:22px; background:#050505; touch-action:none; cursor:pointer; outline:none; }
         .segments { position:absolute; left:4px; right:4px; top:4px; bottom:4px; display:grid; grid-template-rows:repeat(14,minmax(0,1fr)); grid-auto-flow:dense; gap:2px; overflow:hidden; border-radius:17px; transform:${reverse ? 'none' : 'rotate(180deg)'}; }
         .segments i { display:block; min-height:0; background:#282124; border-radius:1px; }
-        .segments i.on { background:linear-gradient(90deg,#ef79a7,var(--c)); box-shadow:0 0 5px color-mix(in srgb,var(--c) 55%,transparent); }
+        .segments i { --level-color:var(--c); }
+        .segments i.severity-green { --level-color:${this._cssColor(this._config.severity_green_color || "theme", "success")}; }
+        .segments i.severity-yellow { --level-color:${this._cssColor(this._config.severity_yellow_color || "theme", "warning")}; }
+        .segments i.severity-red { --level-color:${this._cssColor(this._config.severity_red_color || "theme", "error")}; }
+        .segments i.on { background:linear-gradient(90deg,color-mix(in srgb,var(--level-color) 58%,white),var(--level-color)); box-shadow:0 0 5px color-mix(in srgb,var(--level-color) 55%,transparent); }
         .pointer { position:absolute; left:calc(100% - 28px); width:0; height:0; border-top:8px solid transparent; border-bottom:8px solid transparent; border-right:10px solid var(--c); }
         .ticks span { position:absolute; left:calc(100% - 17px); transform:translateY(-50%); color:var(--a); font-size:11px; white-space:nowrap; }
         .ticks span::before { content:''; position:absolute; right:100%; top:50%; width:11px; border-top:1px solid var(--a); }
@@ -348,9 +421,14 @@ class LcarsEnvironmentCard extends HTMLElement {
     const pointerPct = this._percent(pointer) * 100;
     const reverse = this._config.direction === "reverse";
     const displayPointerPct = reverse ? 100 - pointerPct : pointerPct;
-    const componentWidth = Math.max(118, Number(this._config.width) || 154);
     const horizontal = this._config.orientation === "horizontal";
-    const scaleValues = this._scaleValues(300, 32);
+    const componentWidth = horizontal
+      ? Math.max(118, Number(this._config.height) || Number(this._config.width) || 154)
+      : Math.max(118, Number(this._config.width) || 154);
+    const scaleLength = horizontal
+      ? Math.max(160, this._layoutWidth || this.getBoundingClientRect().width || 300)
+      : Math.max(160, Number(this._config.height) || 300);
+    const scaleValues = this._scaleValues(scaleLength, 32);
     const ticks = scaleValues.map((value) => {
       const ratio = reverse
         ? (value - this._config.min) / (this._config.max - this._config.min)
@@ -361,21 +439,29 @@ class LcarsEnvironmentCard extends HTMLElement {
     const levelCount = Math.max(1, Math.round((this._config.max - this._config.min) / this._config.step));
     const activeLevels = Math.max(0, Math.min(levelCount,
       Math.round((gauge - this._config.min) / this._config.step)));
+    const showSeverityBands = this._showSeverityBands();
     const indicatorLevels = Array.from({ length: levelCount }, (_, index) => {
-      const active = reverse ? index < activeLevels : index >= levelCount - activeLevels;
-      return `<i class="${active ? "on" : ""}"></i>`;
+      const active = showSeverityBands || (reverse ? index < activeLevels : index >= levelCount - activeLevels);
+      const ratio = reverse ? (index + 0.5) / levelCount : 1 - ((index + 0.5) / levelCount);
+      const levelValue = this._config.min + ratio * (this._config.max - this._config.min);
+      const band = this._severityBand(levelValue);
+      return `<i class="${active ? "on" : ""} ${band ? `severity-${band}` : ""}"></i>`;
     }).join("");
     const role = this._isInteractive() ? "slider" : "meter";
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display:inline-block; width:${horizontal ? 300 : componentWidth}px; height:${horizontal ? componentWidth : 300}px; --c:${this._config.color}; --a:${this._config.accent}; --p:${this._config.panel}; }
-        ha-card { width:${componentWidth}px; height:300px; min-height:300px; overflow:visible; padding:0; background:transparent; border:0; box-shadow:none; font-family:'Arial Narrow','Roboto Condensed',sans-serif; transform-origin:top left; ${horizontal ? 'transform:translateX(300px) rotate(90deg);' : ''} }
-        .control { display:grid; grid-template-columns:minmax(60px,calc(100% - 46px)) 46px; height:300px; }
-        .assembly { position:relative; width:100%; height:300px; }
+        :host { display:inline-block; width:${horizontal ? "100%" : `${componentWidth}px`}; height:${horizontal ? componentWidth : scaleLength}px !important; min-height:${horizontal ? componentWidth : scaleLength}px; --c:${this._cssColor(this._config.color)}; --a:${this._cssColor(this._config.accent, "accent")}; --p:${this._config.panel}; }
+        ha-card { width:${componentWidth}px; height:${scaleLength}px; min-height:${scaleLength}px; overflow:visible; padding:0; background:transparent; border:0; box-shadow:none; font-family:'Arial Narrow','Roboto Condensed',sans-serif; transform-origin:top left; ${horizontal ? `transform:translateX(${scaleLength}px) rotate(90deg);` : ''} }
+        .control { display:grid; grid-template-columns:minmax(60px,calc(100% - 46px)) 46px; height:${scaleLength}px; }
+        .assembly { position:relative; width:100%; height:${scaleLength}px; }
         .column { position:absolute; inset:0 18px 0 0; overflow:hidden; box-sizing:border-box; background:#21181a; border:2px solid #4a3d42; border-radius:22px 22px 30px 30px; }
         .indicator-levels { position:absolute; inset:4px; display:grid; grid-template-rows:repeat(${levelCount},minmax(0,1fr)); gap:2px; overflow:hidden; border-radius:17px 17px 25px 25px; }
         .indicator-levels i { display:block; min-height:0; background:#2b2022; }
-        .indicator-levels i.on { background:linear-gradient(90deg,#bf2d1d 0%,var(--c) 46%,#ff934c 100%); box-shadow:0 0 8px color-mix(in srgb,var(--c) 65%,transparent); }
+        .indicator-levels i { --level-color:var(--c); }
+        .indicator-levels i.severity-green { --level-color:${this._cssColor(this._config.severity_green_color || "theme", "success")}; }
+        .indicator-levels i.severity-yellow { --level-color:${this._cssColor(this._config.severity_yellow_color || "theme", "warning")}; }
+        .indicator-levels i.severity-red { --level-color:${this._cssColor(this._config.severity_red_color || "theme", "error")}; }
+        .indicator-levels i.on { background:linear-gradient(90deg,color-mix(in srgb,var(--level-color) 62%,black) 0%,var(--level-color) 46%,color-mix(in srgb,var(--level-color) 62%,white) 100%); box-shadow:0 0 8px color-mix(in srgb,var(--level-color) 65%,transparent); }
         .selector-rail { position:absolute; top:10px; bottom:10px; right:7px; width:5px; background:#282232; box-shadow:0 0 0 1px #40384c; }
         .selector-level { position:absolute; right:0; ${reverse ? 'top:0;' : 'bottom:0;'} left:0; height:${pointerPct}%; background:var(--a); box-shadow:0 0 8px var(--a); }
         .cursor-arrow { position:absolute; left:0; right:2px; bottom:${cursorBottom}; height:18px; transform:translateY(50%); background:#050505; clip-path:polygon(0 5.25px,calc(100% - 12px) 5.25px,calc(100% - 12px) 0,100% 50%,calc(100% - 12px) 100%,calc(100% - 12px) 12.75px,0 12.75px); filter:drop-shadow(0 0 5px var(--a)); pointer-events:none; }
@@ -414,7 +500,11 @@ class LcarsSliderButtonEditor extends HTMLElement {
   }
 
   setConfig(config) {
+    const previous = this._config ? JSON.stringify(this._config) : null;
+    const incoming = JSON.stringify(config || {});
     this._config = { ...config };
+    const form = this.shadowRoot?.querySelector("ha-form");
+    if (form && (incoming === previous || incoming === this._lastEmittedConfig)) return;
     this._render();
   }
 
@@ -424,7 +514,8 @@ class LcarsSliderButtonEditor extends HTMLElement {
       mode: "Modo",
       orientation: "Orientação",
       direction: "Sentido do preenchimento",
-      width: "Largura do componente (px)",
+      width: "Largura (px; horizontal ocupa 100%)",
+      height: "Altura (px)",
       entity: "Entidade principal",
       value_entity: "Entidade exibida",
       gauge_entity: "Entidade do indicador",
@@ -438,9 +529,17 @@ class LcarsSliderButtonEditor extends HTMLElement {
       max: "Máximo",
       step: "Passo",
       decimals: "Casas decimais",
-      color: "Cor do indicador",
-      accent: "Cor do seletor",
+      color: "Cor do preenchimento (theme ou CSS)",
+      accent: "Cor do seletor (theme ou CSS)",
       panel: "Cor das marcas",
+      needle: "Comportamento de gauge (faixas completas)",
+      severity_mode: "Exibição das faixas",
+      severity_green: "Início da faixa verde",
+      severity_yellow: "Início da faixa amarela",
+      severity_red: "Início da faixa vermelha",
+      severity_green_color: "Cor verde (theme ou CSS)",
+      severity_yellow_color: "Cor amarela (theme ou CSS)",
+      severity_red_color: "Cor vermelha (theme ou CSS)",
     };
     return labels[schema.name] || schema.name;
   }
@@ -453,6 +552,12 @@ class LcarsSliderButtonEditor extends HTMLElement {
       orientation: "vertical",
       direction: "normal",
       width: this._config.visual === "transporter" ? 154 : 88,
+      height: this._config.height ?? (this._config.orientation === "horizontal"
+        ? (this._config.width ?? (this._config.visual === "transporter" ? 154 : 88))
+        : (this._config.visual === "transporter" ? 300 : 230)),
+      severity_green: this._config.severity?.green ?? this._config.severity_green,
+      severity_yellow: this._config.severity?.yellow ?? this._config.severity_yellow,
+      severity_red: this._config.severity?.red ?? this._config.severity_red,
       ...this._config,
     };
     this.shadowRoot.innerHTML = `<style>:host{display:block;padding:4px 0}ha-form{display:block}</style><ha-form></ha-form>`;
@@ -476,7 +581,13 @@ class LcarsSliderButtonEditor extends HTMLElement {
         { value: "normal", label: "Normal" },
         { value: "reverse", label: "Invertido" },
       ] } } },
-      { name: "width", selector: { number: { mode: "box", min: 72, max: 400, step: 1, unit_of_measurement: "px" } } },
+      { name: "needle", selector: { boolean: {} } },
+      { name: "severity_mode", selector: { select: { mode: "dropdown", options: [
+        { value: "fill", label: "Somente até o valor" },
+        { value: "bands", label: "Escala completa, como gauge" },
+      ] } } },
+      { name: "width", selector: { number: { mode: "box", min: 72, max: 1000, step: 1, unit_of_measurement: "px" } } },
+      { name: "height", selector: { number: { mode: "box", min: 72, max: 1000, step: 1, unit_of_measurement: "px" } } },
       { name: "entity", required: true, selector: { entity: {} } },
       { name: "value_entity", selector: { entity: {} } },
       { name: "gauge_entity", selector: { entity: {} } },
@@ -490,6 +601,12 @@ class LcarsSliderButtonEditor extends HTMLElement {
       { name: "max", selector: { number: { mode: "box" } } },
       { name: "step", selector: { number: { mode: "box" } } },
       { name: "decimals", selector: { number: { mode: "box", min: 0, max: 4, step: 1 } } },
+      { name: "severity_green", selector: { number: { mode: "box" } } },
+      { name: "severity_yellow", selector: { number: { mode: "box" } } },
+      { name: "severity_red", selector: { number: { mode: "box" } } },
+      { name: "severity_green_color", selector: { text: {} } },
+      { name: "severity_yellow_color", selector: { text: {} } },
+      { name: "severity_red_color", selector: { text: {} } },
       { name: "color", selector: { text: {} } },
       { name: "accent", selector: { text: {} } },
       { name: "panel", selector: { text: {} } },
@@ -497,6 +614,7 @@ class LcarsSliderButtonEditor extends HTMLElement {
     form.computeLabel = (schema) => this._label(schema);
     form.addEventListener("value-changed", (event) => {
       this._config = { ...editorData, ...event.detail.value };
+      this._lastEmittedConfig = JSON.stringify(this._config);
       this.dispatchEvent(new CustomEvent("config-changed", {
         detail: { config: this._config },
         bubbles: true,
