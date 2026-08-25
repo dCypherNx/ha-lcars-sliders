@@ -1,4 +1,4 @@
-/** LCARS Slider Button v1.2.0 */
+/** LCARS Slider Button v1.2.13 */
 class LcarsEnvironmentCard extends HTMLElement {
   static getConfigElement() {
     return document.createElement("lcars-slider-button-editor");
@@ -62,6 +62,7 @@ class LcarsEnvironmentCard extends HTMLElement {
       scale_divisor: 1,
       scale_unit: "",
       scale_decimals: null,
+      scale_step: null,
       value_label_position: "none",
       value_label_source: "gauge",
       panel: "#9b9b9b",
@@ -354,6 +355,19 @@ class LcarsEnvironmentCard extends HTMLElement {
     const range = max - min;
     if (!Number.isFinite(range) || range <= 0) return [min];
 
+    const configuredStep = Number(this._config.scale_step);
+    if (Number.isFinite(configuredStep) && configuredStep > 0) {
+      const epsilon = configuredStep / 100000;
+      const values = [min];
+      let value = Math.ceil((min + epsilon) / configuredStep) * configuredStep;
+      while (value < max - epsilon) {
+        values.push(Number(value.toPrecision(12)));
+        value += configuredStep;
+      }
+      values.push(max);
+      return [...new Set(values)];
+    }
+
     const usablePixels = Math.max(1, availablePixels - 20);
     const maximumLabels = Math.max(2, Math.floor(usablePixels / minimumLabelGap) + 1);
     const rawStep = range / Math.max(1, maximumLabels - 1);
@@ -388,8 +402,17 @@ class LcarsEnvironmentCard extends HTMLElement {
     const pointer = this._pointerValue();
     const gaugePct = this._percent(gauge) * 100;
     const pointerPct = this._percent(pointer) * 100;
+    const discrete = this._isInteractive();
+    const selectionCount = discrete
+      ? Math.max(1, Math.round((this._config.max - this._config.min) / this._config.step) + 1)
+      : 14;
+    const discreteIndex = (value) => Math.max(0, Math.min(selectionCount - 1,
+      Math.round((value - this._config.min) / this._config.step)));
+    const centeredPct = discrete
+      ? ((discreteIndex(pointer) + 0.5) / selectionCount) * 100
+      : pointerPct;
     const reverse = this._config.direction === "reverse";
-    const displayPointerPct = reverse ? 100 - pointerPct : pointerPct;
+    const displayPointerPct = reverse ? 100 - centeredPct : centeredPct;
     const horizontal = this._config.orientation === "horizontal";
     const showName = horizontal && Boolean(this._config.name);
     const nameSpace = showName ? 25 : 0;
@@ -400,9 +423,15 @@ class LcarsEnvironmentCard extends HTMLElement {
       ? Math.max(120, this._layoutWidth || this.getBoundingClientRect().width || 230)
       : Math.max(120, Number(this._config.height) || 230);
     const scaleValues = this._scaleValues(scaleLength, 22);
-    const tickRatio = (value) => reverse
-      ? (value - this._config.min) / (this._config.max - this._config.min)
-      : (this._config.max - value) / (this._config.max - this._config.min);
+    const tickRatio = (value) => {
+      if (discrete) {
+        const center = (discreteIndex(value) + 0.5) / selectionCount;
+        return reverse ? center : 1 - center;
+      }
+      return reverse
+        ? (value - this._config.min) / (this._config.max - this._config.min)
+        : (this._config.max - value) / (this._config.max - this._config.min);
+    };
     const majorTicks = scaleValues.map((value) => {
       const ratio = tickRatio(value);
       return `<span class="major" style="top:calc(${ratio * 100}% + ${10 - ratio * 20}px)"><b>${this._formatScale(value)}</b></span>`;
@@ -414,10 +443,15 @@ class LcarsEnvironmentCard extends HTMLElement {
     });
     const ticks = [...majorTicks, ...minorTicks].join("");
     const showSeverityBands = this._showSeverityBands();
-    const segments = Array.from({ length: 14 }, (_, i) => {
-      const levelValue = this._config.min + ((i + 0.5) / 14) * (this._config.max - this._config.min);
+    const activeCount = discrete
+      ? discreteIndex(gauge) + 1
+      : Math.round((gaugePct / 100) * selectionCount);
+    const segments = Array.from({ length: selectionCount }, (_, i) => {
+      const levelValue = discrete
+        ? this._config.min + i * this._config.step
+        : this._config.min + ((i + 0.5) / selectionCount) * (this._config.max - this._config.min);
       const band = this._severityBand(levelValue);
-      const active = showSeverityBands || (i + 1) / 14 <= gaugePct / 100;
+      const active = showSeverityBands || i < activeCount;
       return `<i class="${active ? "on" : ""} ${band ? `severity-${band}` : ""}"></i>`;
     }).join("");
     this.shadowRoot.innerHTML = `
@@ -426,7 +460,7 @@ class LcarsEnvironmentCard extends HTMLElement {
         ha-card { width:${componentWidth}px; height:${scaleLength}px; min-height:${scaleLength}px; box-sizing:border-box; overflow:visible; background:transparent; border:0; box-shadow:none; color:#fff; font-family:'Arial Narrow','Roboto Condensed',sans-serif; transform-origin:top left; ${horizontal ? `transform:translateX(${scaleLength}px) rotate(90deg);` : ''} }
         .gauge { position:relative; width:${componentWidth}px; height:${scaleLength}px; }
         .track { position:absolute; inset:0 28px 0 0; border:2px solid #6b5960; border-radius:22px; background:#050505; touch-action:none; cursor:pointer; outline:none; }
-        .segments { position:absolute; left:4px; right:4px; top:4px; bottom:4px; display:grid; grid-template-rows:repeat(14,minmax(0,1fr)); grid-auto-flow:dense; gap:2px; overflow:hidden; border-radius:17px; transform:${reverse ? 'none' : 'rotate(180deg)'}; }
+        .segments { position:absolute; left:4px; right:4px; top:4px; bottom:4px; display:grid; grid-template-rows:repeat(${selectionCount},minmax(0,1fr)); grid-auto-flow:dense; gap:2px; overflow:hidden; border-radius:17px; transform:${reverse ? 'none' : 'rotate(180deg)'}; }
         .segments i { display:block; min-height:0; background:#282124; border-radius:1px; }
         .segments i { --level-color:var(--c); }
         .segments i.severity-green { --level-color:${this._cssColor(this._config.severity_green_color || "theme", "success")}; }
@@ -463,62 +497,96 @@ class LcarsEnvironmentCard extends HTMLElement {
     const pointer = this._pointerValue();
     const gaugePct = this._percent(gauge) * 100;
     const pointerPct = this._percent(pointer) * 100;
+    const discrete = this._isInteractive();
+    const levelCount = discrete
+      ? Math.max(1, Math.round((this._config.max - this._config.min) / this._config.step) + 1)
+      : Math.max(1, Math.round((this._config.max - this._config.min) / this._config.step));
+    const discreteIndex = (value) => Math.max(0, Math.min(levelCount - 1,
+      Math.round((value - this._config.min) / this._config.step)));
+    const levelInset = 3;
+    const levelGap = 2;
+    const levelBorder = 0;
+    const gridCenter = (index) => {
+      const ratio = (index + 0.5) / levelCount;
+      const gridInset = levelBorder + levelInset;
+      const fixedSpace = gridInset * 2 + (levelCount - 1) * levelGap;
+      const pixelOffset = gridInset + index * levelGap - ratio * fixedSpace;
+      return `calc(${ratio * 100}% + ${pixelOffset}px)`;
+    };
+    const centeredPct = discrete
+      ? ((discreteIndex(pointer) + 0.5) / levelCount) * 100
+      : pointerPct;
     const reverse = this._config.direction === "reverse";
-    const displayPointerPct = reverse ? 100 - pointerPct : pointerPct;
+    const displayPointerPct = reverse ? 100 - centeredPct : centeredPct;
     const horizontal = this._config.orientation === "horizontal";
     const showName = horizontal && Boolean(this._config.name);
-    const nameSpace = showName ? 26 : 0;
+    const nameSpace = showName ? 25 : 0;
+    const scaleWidth = 46;
     const componentWidth = horizontal
-      ? Math.max(118, Number(this._config.height) || Number(this._config.width) || 154)
+      ? Math.max(88, Number(this._config.height) || Number(this._config.width) || 120)
       : Math.max(118, Number(this._config.width) || 154);
     const scaleLength = horizontal
       ? Math.max(160, this._layoutWidth || this.getBoundingClientRect().width || 300)
       : Math.max(160, Number(this._config.height) || 300);
+    const hostHeight = horizontal ? (showName ? componentWidth - 7 : componentWidth) : scaleLength;
     const scaleValues = this._scaleValues(scaleLength, 32);
     const ticks = scaleValues.map((value) => {
-      const ratio = reverse
-        ? (value - this._config.min) / (this._config.max - this._config.min)
-        : (this._config.max - value) / (this._config.max - this._config.min);
-      return `<div class="tick" style="top:calc(${ratio * 100}% + ${10 - ratio * 20}px)"><b>${this._formatScale(value)}</b></div>`;
+      const ratio = discrete
+        ? (reverse
+          ? (discreteIndex(value) + 0.5) / levelCount
+          : 1 - ((discreteIndex(value) + 0.5) / levelCount))
+        : (reverse
+          ? (value - this._config.min) / (this._config.max - this._config.min)
+          : (this._config.max - value) / (this._config.max - this._config.min));
+      const tickPosition = discrete
+        ? gridCenter(reverse ? discreteIndex(value) : levelCount - 1 - discreteIndex(value))
+        : `calc(${ratio * 100}% + ${10 - ratio * 20}px)`;
+      return `<div class="tick" style="top:${tickPosition}"><b>${this._formatScale(value)}</b></div>`;
     }).join("");
-    const cursorBottom = `calc(${displayPointerPct}% + ${10 - displayPointerPct * 0.2}px)`;
-    const levelCount = Math.max(1, Math.round((this._config.max - this._config.min) / this._config.step));
-    const activeLevels = Math.max(0, Math.min(levelCount,
-      Math.round((gauge - this._config.min) / this._config.step)));
+    const cursorBottom = discrete
+      ? gridCenter(reverse ? levelCount - 1 - discreteIndex(pointer) : discreteIndex(pointer))
+      : `calc(${displayPointerPct}% + ${10 - displayPointerPct * 0.2}px)`;
+    const activeLevels = discrete
+      ? discreteIndex(gauge) + 1
+      : Math.max(0, Math.min(levelCount, Math.round((gauge - this._config.min) / this._config.step)));
     const showSeverityBands = this._showSeverityBands();
     const indicatorLevels = Array.from({ length: levelCount }, (_, index) => {
       const active = showSeverityBands || (reverse ? index < activeLevels : index >= levelCount - activeLevels);
       const ratio = reverse ? (index + 0.5) / levelCount : 1 - ((index + 0.5) / levelCount);
-      const levelValue = this._config.min + ratio * (this._config.max - this._config.min);
+      const levelValue = discrete
+        ? (reverse
+          ? this._config.min + index * this._config.step
+          : this._config.max - index * this._config.step)
+        : this._config.min + ratio * (this._config.max - this._config.min);
       const band = this._severityBand(levelValue);
       return `<i class="${active ? "on" : ""} ${band ? `severity-${band}` : ""}"></i>`;
     }).join("");
     const role = this._isInteractive() ? "slider" : "meter";
     this.shadowRoot.innerHTML = `
       <style>
-        :host { position:relative; display:inline-block; width:${horizontal ? "100%" : `${componentWidth}px`}; height:${horizontal ? componentWidth + nameSpace : scaleLength}px !important; min-height:${horizontal ? componentWidth + nameSpace : scaleLength}px; --c:${this._cssColor(this._config.color)}; --a:${this._cssColor(this._config.accent, "accent")}; --p:${this._config.panel}; }
+        :host { position:relative; display:inline-block; vertical-align:top; width:${horizontal ? "100%" : `${componentWidth}px`}; height:${hostHeight}px !important; min-height:${hostHeight}px; --c:${this._cssColor(this._config.color)}; --a:${this._cssColor(this._config.accent, "accent")}; --p:${this._config.panel}; }
         ha-card { width:${componentWidth}px; height:${scaleLength}px; min-height:${scaleLength}px; overflow:visible; padding:0; background:transparent; border:0; box-shadow:none; font-family:'Arial Narrow','Roboto Condensed',sans-serif; transform-origin:top left; ${horizontal ? `transform:translateX(${scaleLength}px) rotate(90deg);` : ''} }
-        .control { display:grid; grid-template-columns:minmax(60px,calc(100% - 46px)) 46px; height:${scaleLength}px; }
+        .control { display:grid; grid-template-columns:minmax(42px,calc(100% - ${scaleWidth}px)) ${scaleWidth}px; height:${scaleLength}px; }
         .assembly { position:relative; width:100%; height:${scaleLength}px; }
-        .column { position:absolute; inset:0 18px 0 0; overflow:hidden; box-sizing:border-box; background:#21181a; border:2px solid #4a3d42; border-radius:22px 22px 30px 30px; }
-        .indicator-levels { position:absolute; inset:4px; display:grid; grid-template-rows:repeat(${levelCount},minmax(0,1fr)); gap:2px; overflow:hidden; border-radius:17px 17px 25px 25px; }
+        .column { position:absolute; inset:0 18px 0 0; overflow:hidden; box-sizing:border-box; background:#21181a; border:0; border-radius:0; }
+        .indicator-levels { position:absolute; inset:${levelInset}px; display:grid; grid-template-rows:repeat(${levelCount},minmax(0,1fr)); gap:${levelGap}px; overflow:hidden; border-radius:0; }
         .indicator-levels i { display:block; min-height:0; background:#2b2022; }
         .indicator-levels i { --level-color:var(--c); }
         .indicator-levels i.severity-green { --level-color:${this._cssColor(this._config.severity_green_color || "theme", "success")}; }
         .indicator-levels i.severity-yellow { --level-color:${this._cssColor(this._config.severity_yellow_color || "theme", "warning")}; }
         .indicator-levels i.severity-red { --level-color:${this._cssColor(this._config.severity_red_color || "theme", "error")}; }
         .indicator-levels i.on { background:linear-gradient(90deg,color-mix(in srgb,var(--level-color) 62%,black) 0%,var(--level-color) 46%,color-mix(in srgb,var(--level-color) 62%,white) 100%); box-shadow:0 0 8px color-mix(in srgb,var(--level-color) 65%,transparent); }
-        .selector-rail { position:absolute; top:10px; bottom:10px; right:7px; width:5px; background:#282232; box-shadow:0 0 0 1px #40384c; }
-        .selector-level { position:absolute; right:0; ${reverse ? 'top:0;' : 'bottom:0;'} left:0; height:${pointerPct}%; background:var(--a); box-shadow:0 0 8px var(--a); }
+        .selector-rail { position:absolute; top:10px; bottom:10px; right:12px; width:5px; background:#282232; box-shadow:0 0 0 1px #40384c; }
+        .selector-level { position:absolute; right:0; ${reverse ? 'top:0;' : 'bottom:0;'} left:0; height:${centeredPct}%; background:var(--a); box-shadow:0 0 8px var(--a); }
         .cursor-arrow { position:absolute; left:0; right:2px; bottom:${cursorBottom}; height:18px; transform:translateY(50%); background:#050505; clip-path:polygon(0 5.25px,calc(100% - 12px) 5.25px,calc(100% - 12px) 0,100% 50%,calc(100% - 12px) 100%,calc(100% - 12px) 12.75px,0 12.75px); filter:drop-shadow(0 0 5px var(--a)); pointer-events:none; }
         .cursor-arrow::after { content:''; position:absolute; inset:1px; background:var(--a); clip-path:polygon(0 5.25px,calc(100% - 10px) 5.25px,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,calc(100% - 10px) 10.75px,0 10.75px); }
         .track { position:absolute; inset:0; z-index:4; touch-action:none; cursor:pointer; outline:none; }
-        .value-label { position:absolute; inset:18px 42px 18px 8px; z-index:3; display:flex; align-items:center; justify-content:center; color:#fff; font-size:16px; font-weight:900; letter-spacing:.03em; text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 5px #000; pointer-events:none; ${horizontal ? 'transform:rotate(-90deg);' : ''} }
+        .value-label { position:absolute; top:12px; right:18px; bottom:12px; left:0; z-index:3; display:flex; align-items:center; justify-content:center; color:#fff; font-size:16px; font-weight:900; line-height:1; letter-spacing:.03em; text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 5px #000; pointer-events:none; ${horizontal ? 'transform:rotate(-90deg);' : ''} }
         .scale-unit { position:absolute; right:28px; top:10px; z-index:3; color:#fff; font-size:10px; font-weight:900; letter-spacing:.06em; text-shadow:0 0 4px #000,-1px -1px 0 #000,1px 1px 0 #000; pointer-events:none; ${horizontal ? 'transform:rotate(-90deg); transform-origin:center;' : ''} }
         .scale { position:relative; height:100%; }
-        .tick { position:absolute; left:-2px; transform:translateY(-50%); color:var(--a); font-size:13px; font-weight:900; line-height:1; letter-spacing:.02em; white-space:nowrap; }
+        .tick { position:absolute; left:-17px; transform:translateY(-50%); color:var(--a); font-size:13px; font-weight:900; line-height:1; letter-spacing:.02em; white-space:nowrap; }
         .tick b { display:flex; align-items:center; height:16px; min-width:34px; font:inherit; text-align:left; -webkit-text-stroke:1px #050505; paint-order:stroke fill; text-shadow:-1px -1px 0 #050505,1px -1px 0 #050505,-1px 1px 0 #050505,1px 1px 0 #050505,0 0 4px #050505; ${horizontal ? 'transform:rotate(-90deg); transform-origin:center; justify-content:center;' : ''} }
-        .name-label { position:absolute; left:0; right:0; top:${componentWidth + 5}px; color:#fff; font-size:16px; font-weight:900; line-height:18px; letter-spacing:.03em; text-align:center; text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 5px #000; pointer-events:none; }
+        .name-label { position:absolute; left:0; right:0; top:${componentWidth - 30}px; color:#fff; font-size:16px; font-weight:900; line-height:18px; letter-spacing:.03em; text-align:center; text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 5px #000; pointer-events:none; }
       </style>
       <ha-card>
         <div class="control">

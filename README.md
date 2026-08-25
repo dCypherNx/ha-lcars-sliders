@@ -49,7 +49,7 @@ See [`examples.yaml`](examples.yaml) for complete configurations.
 
 ## Version
 
-Current stable release: `v1.2.0`.
+Current stable release: `v1.2.13`.
 
 ## License
 
